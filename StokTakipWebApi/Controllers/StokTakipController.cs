@@ -1,14 +1,18 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
 using StokTakipWebApi.Models;
+using StokTakipWebApi.Protokol;
+using System.IdentityModel.Tokens.Jwt;
+using System.Text;
 
 namespace StokTakipWebApi.Controllers
 {
-    [Route("api/v1/[action]")]
     [ApiController]
+    [Authorize]
+    [Route("api/v1/[action]")]
     public class StokTakipController : ControllerBase
     {
-
         StokTakipDbContext ctx;
         public StokTakipController(StokTakipDbContext dbContext)
         {
@@ -16,15 +20,135 @@ namespace StokTakipWebApi.Controllers
         }
 
         [HttpGet]
-        public IEnumerable<TblKullanicilar> KullanicilariGetir()
+        [AllowAnonymous]
+        public string Test()
         {
-            return ctx.TblKullanicilars.ToList();
+            return "Api erişimi çalışıyor.";
         }
 
-        [HttpGet]
-        public string Test() 
+        [HttpPost]
+        [AllowAnonymous]
+        public ApiCevap OturumAc(string kullaniciAdi, string parola)
         {
-            return "Merhaba Dünya";
+            var kullanici = ctx.TblKullanicilars.FirstOrDefault(x => x.KullaniciAd == kullaniciAdi && x.Parola == parola);
+            ApiCevap cevap = new ApiCevap();
+            if (kullanici == null)
+            {
+                cevap.BasariliMi = false;
+                cevap.HataMesaji = "Kullanıcı adı yada parola hatalı.";
+            }
+            else
+            {
+                //Burada kullanıcı için bilet düzenlenecek
+                var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("Bu gizli bir kelime"));
+                var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+                DateTime now = DateTime.Now;
+
+                System.Security.Claims.Claim[] claims =
+                {
+                    new System.Security.Claims.Claim("kullanici_id", kullanici.KullaniciId.ToString()),
+                    new System.Security.Claims.Claim("kullanici_ad", kullanici.KullaniciAd),
+                    new System.Security.Claims.Claim("kullanici_yetki", kullanici.Yetki.GetValueOrDefault().ToString()),
+
+                };
+
+                var token = new JwtSecurityToken("stoktakip.com", "stokstakip.com",
+              claims,
+              notBefore: now,//başlangıç tarihi
+              expires: now.AddDays(7),//bitiş tarihi
+              signingCredentials: creds);
+
+
+                //Bana bu access token gerekli
+                string access = new JwtSecurityTokenHandler().WriteToken(token);
+
+                cevap.BasariliMi = true;
+                cevap.Data = access;
+
+            }
+
+            return cevap;
         }
+
+
+        [HttpGet]
+
+        public ApiCevap KullanicilariGetir()
+        {
+            ApiCevap cevap = new ApiCevap();
+            cevap.Data = ctx.TblKullanicilars.ToList();
+            cevap.BasariliMi = true;
+            return cevap;
+        }
+
+        [HttpPost]
+        public ApiCevap KategoriEkle(TblKategoriler kategori)
+        {
+            ApiCevap cevap = new ApiCevap();
+
+            ctx.TblKategorilers.Add(kategori);
+            ctx.SaveChanges();
+            cevap.BasariliMi = true;
+            cevap.Data = kategori;
+
+            return cevap;
+        }
+
+        [HttpPost]
+        public ApiCevap KategoriListesiniGetir()
+        {
+            ApiCevap cevap = new ApiCevap();
+            cevap.BasariliMi = true;
+            cevap.Data = ctx.TblKategorilers.ToList();
+            return cevap;
+        }
+
+        [HttpPost]
+        public ApiCevap KategoriGuncelle(TblKategoriler kategori)
+        {
+            ApiCevap cevap = new ApiCevap();
+
+            var kat = ctx.TblKategorilers.FirstOrDefault(x => x.KategoriId == kategori.KategoriId);
+
+            if (kat == null)
+            {
+                cevap.BasariliMi = false;
+                cevap.HataMesaji = "Böyle bir kayıt bulunamadı. kategoriId: " + kategori.KategoriId;
+                return cevap;
+            }
+
+            cevap.BasariliMi = true;
+
+            kat.KategoriAdi = kategori.KategoriAdi;
+            ctx.SaveChanges();
+
+            cevap.Data = kat;
+
+            return cevap;
+        }
+
+        [HttpPost]
+        public ApiCevap KategoriSil(int id)
+        {
+            ApiCevap cevap = new ApiCevap();
+
+            var kat = ctx.TblKategorilers.FirstOrDefault(x => x.KategoriId == id);
+
+            if (kat == null)
+            {
+                cevap.BasariliMi = false;
+                cevap.HataMesaji = "Böyle bir kayıt bulunamadı. kategoriId: " + id;
+                return cevap;
+            }
+
+            ctx.TblKategorilers.Remove(kat);
+            ctx.SaveChanges();
+            cevap.BasariliMi = true;
+            cevap.Data = true;
+
+            return cevap;
+        }
+
     }
 }
